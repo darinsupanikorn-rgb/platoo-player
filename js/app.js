@@ -812,6 +812,9 @@
   const backingDelayWet = {};
   const backingReverbNodes = {};
   const backingReverbWet = {};
+  const backingEqBass = {};
+  const backingEqMid = {};
+  const backingEqTreble = {};
 
   const backingSelectBtn = document.getElementById('backingSelectBtn');
   const backingFileInput = document.getElementById('backingFileInput');
@@ -915,6 +918,9 @@
       if (instState[inst.id + '_fx_reverb'] === undefined) instState[inst.id + '_fx_reverb'] = 0;
       if (instState[inst.id + '_fx_delay'] === undefined) instState[inst.id + '_fx_delay'] = 0;
       if (instState[inst.id + '_fx_distortion'] === undefined) instState[inst.id + '_fx_distortion'] = 0;
+      if (instState[inst.id + '_eq_bass'] === undefined) instState[inst.id + '_eq_bass'] = 0;
+      if (instState[inst.id + '_eq_mid'] === undefined) instState[inst.id + '_eq_mid'] = 0;
+      if (instState[inst.id + '_eq_treble'] === undefined) instState[inst.id + '_eq_treble'] = 0;
       if (!backingGainNodes[inst.id]) backingGainNodes[inst.id] = null;
 
       var track = document.createElement('div');
@@ -970,6 +976,14 @@
             <input type="range" min="0" max="100" value="${instState[inst.id + '_fx_distortion'] || 0}" class="fx-slider" data-id="${inst.id}" data-fx="distortion">
             <span class="fx-val" id="fxval_${inst.id}_distortion">${instState[inst.id + '_fx_distortion'] || 0}</span>
           </div>
+        </div>
+        <div class="track-eq-row" data-id="${inst.id}">
+          <span class="eq-label">B</span>
+          <input type="range" min="-12" max="12" value="${instState[inst.id + '_eq_bass'] || 0}" class="eq-slider" data-id="${inst.id}" data-band="bass"><span class="eq-value">${instState[inst.id + '_eq_bass'] || 0}</span>
+          <span class="eq-label">M</span>
+          <input type="range" min="-12" max="12" value="${instState[inst.id + '_eq_mid'] || 0}" class="eq-slider" data-id="${inst.id}" data-band="mid"><span class="eq-value">${instState[inst.id + '_eq_mid'] || 0}</span>
+          <span class="eq-label">T</span>
+          <input type="range" min="-12" max="12" value="${instState[inst.id + '_eq_treble'] || 0}" class="eq-slider" data-id="${inst.id}" data-band="treble"><span class="eq-value">${instState[inst.id + '_eq_treble'] || 0}</span>
         </div>
       `;
 
@@ -1070,6 +1084,24 @@
           var valDisplay = document.getElementById('fxval_' + id + '_' + fxType);
           if (valDisplay) valDisplay.textContent = val;
           updateTrackFX(id);
+        });
+      });
+
+      // EQ sliders
+      track.querySelectorAll('.eq-slider').forEach(function (s) {
+        s.addEventListener('input', function () {
+          var val = this.parentNode.querySelector('.eq-value');
+          if (val) val.textContent = this.value;
+          var band = this.dataset.band;
+          var v = parseFloat(this.value);
+          instState[inst.id + '_eq_' + band] = v;
+          if (band === 'bass' && backingEqBass[inst.id]) {
+            backingEqBass[inst.id].gain.value = v;
+          } else if (band === 'mid' && backingEqMid[inst.id]) {
+            backingEqMid[inst.id].gain.value = v;
+          } else if (band === 'treble' && backingEqTreble[inst.id]) {
+            backingEqTreble[inst.id].gain.value = v;
+          }
         });
       });
 
@@ -1226,6 +1258,15 @@
       if (backingReverbWet[inst.id]) {
         try { backingReverbWet[inst.id].disconnect(); } catch {}
       }
+      if (backingEqBass[inst.id]) {
+        try { backingEqBass[inst.id].disconnect(); } catch {}
+      }
+      if (backingEqMid[inst.id]) {
+        try { backingEqMid[inst.id].disconnect(); } catch {}
+      }
+      if (backingEqTreble[inst.id]) {
+        try { backingEqTreble[inst.id].disconnect(); } catch {}
+      }
 
       var gain = backingAudioCtx.createGain();
       gain.gain.value = instState[inst.id + '_muted'] ? 0 : instState[inst.id] / 100;
@@ -1259,8 +1300,34 @@
       revWet.gain.value = 0;
       backingReverbWet[inst.id] = revWet;
 
+      var eqBass = backingAudioCtx.createBiquadFilter();
+      eqBass.type = 'lowshelf';
+      eqBass.frequency.value = 320;
+      eqBass.gain.value = 0;
+      backingEqBass[inst.id] = eqBass;
+
+      var eqMid = backingAudioCtx.createBiquadFilter();
+      eqMid.type = 'peaking';
+      eqMid.frequency.value = 1000;
+      eqMid.Q.value = 1;
+      eqMid.gain.value = 0;
+      backingEqMid[inst.id] = eqMid;
+
+      var eqTreble = backingAudioCtx.createBiquadFilter();
+      eqTreble.type = 'highshelf';
+      eqTreble.frequency.value = 3200;
+      eqTreble.gain.value = 0;
+      backingEqTreble[inst.id] = eqTreble;
+
+      if (instState[inst.id + '_eq_bass'] !== undefined) eqBass.gain.value = instState[inst.id + '_eq_bass'];
+      if (instState[inst.id + '_eq_mid'] !== undefined) eqMid.gain.value = instState[inst.id + '_eq_mid'];
+      if (instState[inst.id + '_eq_treble'] !== undefined) eqTreble.gain.value = instState[inst.id + '_eq_treble'];
+
       gain.connect(pan);
-      pan.connect(dist);
+      pan.connect(eqBass);
+      eqBass.connect(eqMid);
+      eqMid.connect(eqTreble);
+      eqTreble.connect(dist);
       dist.connect(masterGain);
 
       dist.connect(delay);
@@ -1405,7 +1472,7 @@
       gain.gain.setValueAtTime(metronomeVolume, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start(now);
       osc.stop(now + 0.05);
     } catch (e) { console.warn('metronome click error:', e); }
@@ -1824,6 +1891,15 @@
       s.addEventListener('input', function () {
         var val = this.parentNode.querySelector('.eq-value');
         if (val) val.textContent = this.value;
+        var band = this.dataset.band;
+        var v = parseFloat(this.value);
+        if (band === 'bass' && backingEqBass[id]) {
+          backingEqBass[id].gain.value = v;
+        } else if (band === 'mid' && backingEqMid[id]) {
+          backingEqMid[id].gain.value = v;
+        } else if (band === 'treble' && backingEqTreble[id]) {
+          backingEqTreble[id].gain.value = v;
+        }
         autoSave();
       });
     });
@@ -2018,7 +2094,7 @@
       gain.gain.setValueAtTime(0.3, backingAudioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 2);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start();
       el.classList.add('active');
       activeOscillators[note] = { osc: osc, gain: gain, key: el };
@@ -2283,7 +2359,7 @@
       gain.gain.setValueAtTime(0.12, startTime);
       gain.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start(startTime);
       var el = findGuitarFretEl(si, fret);
       if (el) {
@@ -2372,7 +2448,7 @@
       gain.gain.setValueAtTime(0.2, backingAudioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 1.5);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start();
       el.classList.add('active');
       setTimeout(function () { el.classList.remove('active'); }, 200);
@@ -2569,7 +2645,7 @@
       gain.gain.setValueAtTime(0.2, startTime);
       gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start(startTime);
       var el = findBassFretEl(si, fret);
       if (el) {
@@ -2594,7 +2670,7 @@
       gain.gain.setValueAtTime(0.35, backingAudioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 2);
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start();
       el.classList.add('active');
       setTimeout(function () { el.classList.remove('active'); }, 200);
@@ -2691,7 +2767,7 @@
       filter.frequency.value = key === 'crash' ? 2000 : key === 'ride' ? 1000 : 4000;
       noise.connect(filter);
       filter.connect(ng);
-      ng.connect(backingAudioCtx.destination);
+      ng.connect(masterGain);
       noise.start();
     } else {
       // Tonal drum sounds
@@ -2703,7 +2779,7 @@
       gain.gain.setValueAtTime(0.4, backingAudioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + (key === 'kick' ? 0.4 : 0.2));
       osc.connect(gain);
-      gain.connect(backingAudioCtx.destination);
+      gain.connect(masterGain);
       osc.start();
 
       if (key === 'snare') {
@@ -2722,7 +2798,7 @@
         snFilter.Q.value = 0.5;
         snNoise.connect(snFilter);
         snFilter.connect(snGain);
-        snGain.connect(backingAudioCtx.destination);
+        snGain.connect(masterGain);
         snNoise.start();
       }
     }
@@ -2999,6 +3075,11 @@
       if (backingAudioCtx.state === 'suspended') {
         backingAudioCtx.resume()['catch'](function () {});
       }
+      if (!masterGain) {
+        masterGain = backingAudioCtx.createGain();
+        masterGain.gain.value = 0.8;
+        masterGain.connect(backingAudioCtx.destination);
+      }
       // Keep trying while suspended (some browsers need repeated resume)
       var checkInterval = setInterval(function () {
         if (backingAudioCtx && backingAudioCtx.state === 'suspended') {
@@ -3236,5 +3317,14 @@
     helpBtn.addEventListener('click', openShortcutsOverlay);
     sidebarFooter.appendChild(helpBtn);
   }
+
+  // ─── Error Boundary ───
+  window.onerror = function (msg, url, line, col, err) {
+    console.error('[PlatooPlayer Error]', msg, url, 'line ' + line + ':' + col, err);
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    console.error('[PlatooPlayer Unhandled Promise]', e.reason);
+  });
 
 })();
