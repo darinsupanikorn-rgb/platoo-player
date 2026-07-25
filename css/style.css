@@ -667,47 +667,6 @@ body {
   background: #1a1a1a;
 }
 
-/* ─── Plan Mode Placeholder ─── */
-.placeholder-box {
-  background: #111;
-  border: 1px solid #222;
-  border-radius: 16px;
-  padding: 48px 32px;
-  text-align: center;
-}
-
-.placeholder-icon {
-  font-size: 48px;
-  display: block;
-  margin-bottom: 12px;
-}
-
-.placeholder-box h3 {
-  font-size: 20px;
-  color: #fff;
-  margin-bottom: 8px;
-}
-
-.placeholder-box p {
-  color: #777;
-  font-size: 14px;
-  margin-bottom: 20px;
-}
-
-.placeholder-box ul {
-  list-style: none;
-  display: inline-block;
-  text-align: left;
-  color: #999;
-  font-size: 14px;
-  line-height: 2;
-}
-
-.placeholder-box ul li::before {
-  content: "• ";
-  color: #fff;
-}
-
 /* ─── Metronome visual indicator ─── */
 .metro-indicator {
   width: 12px;
@@ -2026,24 +1985,6 @@ body {
   .inst-detail-info {
     flex-direction: column;
     gap: 8px;
-  }
-
-  .record-controls {
-    padding: 24px 16px;
-  }
-
-  .record-timer {
-    font-size: 36px;
-  }
-
-  .record-buttons {
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .record-btn {
-    width: 100%;
-    max-width: 280px;
   }
 
   .backing-section {
