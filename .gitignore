@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.log
+backend/__pycache__/
+backend/*.pyc
+backend/uploads/
+assets/songs/
+.DS_Store
+Thumbs.db
