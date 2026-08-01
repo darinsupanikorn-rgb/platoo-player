@@ -7,9 +7,14 @@ import {
   activeKeyboardNotes,
   guitarStrings, guitarKeyboardMap, guitarKeyToNote, guitarChords, strumDelay,
   bassStrings, bassKeyboardMap, bassKeyToNote, bassChords,
-  drumPads, drumsKeyToKey
+  drumPads, drumsKeyToKey,
+  originalKey, currentKey
 } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, semitoneOffsetOf, applySemitoneOffset } from './utils.js';
+
+function playFreq(osc, baseFreq) {
+  osc.frequency.value = applySemitoneOffset(baseFreq, semitoneOffsetOf(currentKey, originalKey));
+}
 
 // ─── Local mutable state ───
 
@@ -233,11 +238,6 @@ export function showInstrumentUI(type) {
   }
 }
 
-export function hideAllInstrumentUIs() {
-  [pianoSection, guitarSection, bassSection, drumsSection].forEach(function (s) { if (s) s.hidden = true; });
-  Object.keys(activeOscillators).forEach(function (k) { try { activeOscillators[k].osc.stop(); } catch {} delete activeOscillators[k]; });
-}
-
 // ─── Piano ───
 
 export function buildPianoKeys() {
@@ -268,7 +268,7 @@ export function buildPianoKeys() {
   }
   var lastC = document.createElement('div');
   lastC.className = 'piano-key white';
-  lastC.dataset.freq = 523.25;
+  lastC.dataset.freq = 1046.50;
   lastC.dataset.note = 'C6';
   var kbKey6 = noteKeyDisplay['C6'] || '';
   lastC.innerHTML = '<span class="piano-note-label">C6</span><span class="piano-kb-label">' + kbKey6 + '</span>';
@@ -301,7 +301,7 @@ export function playInstNote(el) {
     var osc = backingAudioCtx.createOscillator();
     var gain = backingAudioCtx.createGain();
     osc.type = 'triangle';
-    osc.frequency.value = freq;
+    playFreq(osc, freq);
     gain.gain.setValueAtTime(0.3, backingAudioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 2);
     osc.connect(gain);
@@ -459,7 +459,7 @@ export function playGuitarChord(chord) {
     var osc = backingAudioCtx.createOscillator();
     var gain = backingAudioCtx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.value = freq;
+    playFreq(osc, freq);
     gain.gain.setValueAtTime(0.12, startTime);
     gain.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5);
     osc.connect(gain);
@@ -484,7 +484,7 @@ export function playGuitarNote(el) {
     var osc = backingAudioCtx.createOscillator();
     var gain = backingAudioCtx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.value = freq;
+    playFreq(osc, freq);
     gain.gain.setValueAtTime(0.2, backingAudioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 1.5);
     osc.connect(gain);
@@ -638,7 +638,7 @@ export function playBassChord(chord) {
     var osc = backingAudioCtx.createOscillator();
     var gain = backingAudioCtx.createGain();
     osc.type = 'sine';
-    osc.frequency.value = freq;
+    playFreq(osc, freq);
     gain.gain.setValueAtTime(0.2, startTime);
     gain.gain.exponentialRampToValueAtTime(0.001, startTime + 2);
     osc.connect(gain);
@@ -663,7 +663,7 @@ export function playBassNote(el) {
     var osc = backingAudioCtx.createOscillator();
     var gain = backingAudioCtx.createGain();
     osc.type = 'sine';
-    osc.frequency.value = freq;
+    playFreq(osc, freq);
     gain.gain.setValueAtTime(0.35, backingAudioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, backingAudioCtx.currentTime + 2);
     osc.connect(gain);

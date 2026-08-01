@@ -27,6 +27,8 @@ import { escapeHtml, formatSize, formatDate, formatDuration } from './utils.js';
 let _addNewTrack = null;
 let _autoSave = null;
 let _ensureAudioCtx = null;
+
+var currentMicId = '';
 let _playMetronomeClick = null;
 
 export function init(deps) {
@@ -34,6 +36,81 @@ export function init(deps) {
   if (deps.autoSave) _autoSave = deps.autoSave;
   if (deps.ensureAudioCtx) _ensureAudioCtx = deps.ensureAudioCtx;
   if (deps.playMetronomeClick) _playMetronomeClick = deps.playMetronomeClick;
+
+  var recordStartBtn = document.getElementById('recordStartBtn');
+  var recordStopBtn = document.getElementById('recordStopBtn');
+  if (recordStartBtn) {
+    recordStartBtn.addEventListener('click', function () {
+      if (!recordingStream) {
+        requestMic(currentMicId).then(startGlobalRecord)['catch'](function () {});
+      } else {
+        startGlobalRecord();
+      }
+    });
+  }
+  if (recordStopBtn) {
+    recordStopBtn.addEventListener('click', stopGlobalRecord);
+  }
+  var micSelect = document.getElementById('micSelect');
+  if (micSelect) {
+    micSelect.addEventListener('change', function () {
+      if (isRecording) {
+        micSelect.value = currentMicId;
+        return;
+      }
+      switchMic(micSelect.value);
+    });
+  }
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+    navigator.mediaDevices.addEventListener('devicechange', refreshMicList);
+  }
+
+  // Auto-request the mic shortly after load (as the original app did) so the
+  // ⏺ button becomes clickable without requiring the user to do anything first.
+  setTimeout(function () {
+    if (!recordingStream && !isRecording) {
+      requestMic(currentMicId)['catch'](function () {});
+    }
+  }, 500);
+}
+
+export function refreshMicList() {
+  var sel = document.getElementById('micSelect');
+  if (!sel) return;
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+  navigator.mediaDevices.enumerateDevices().then(function (devices) {
+    var mics = devices.filter(function (d) { return d.kind === 'audioinput'; });
+    var prev = sel.value;
+    sel.innerHTML = '';
+    var def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'ไมโครโฟนเริ่มต้น (ระบบ)';
+    sel.appendChild(def);
+    mics.forEach(function (d, i) {
+      var o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || ('ไมโครโฟน ' + (i + 1));
+      sel.appendChild(o);
+    });
+    if (prev) sel.value = prev;
+  })['catch'](function () {});
+}
+
+function stopCurrentStream() {
+  stopLevelMeter();
+  if (recordingStream) {
+    if (recordingStream.getTracks) recordingStream.getTracks().forEach(function (t) { if (t.stop) t.stop(); });
+    setRecordingStream(null);
+  }
+  if (mediaRecorder) setMediaRecorder(null);
+}
+
+export function switchMic(deviceId) {
+  if (isRecording) return;
+  var recordStartBtn = document.getElementById('recordStartBtn');
+  if (recordStartBtn) recordStartBtn.disabled = true;
+  stopCurrentStream();
+  requestMic(deviceId)['catch'](function () {});
 }
 
 setRecordings(loadRecordings());
@@ -129,20 +206,28 @@ export function saveRecordings() {
   }))));
 }
 
-export async function requestMic() {
+export async function requestMic(deviceId) {
   var recordStartBtn = document.getElementById('recordStartBtn');
   var deviceName = document.getElementById('deviceName');
   try {
-    setRecordingStream(await navigator.mediaDevices.getUserMedia({ audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      sampleRate: 44100
-    }}));
+    var constraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: 44100
+      }
+    };
+    if (deviceId) constraints.audio.deviceId = { exact: deviceId };
+    setRecordingStream(await navigator.mediaDevices.getUserMedia(constraints));
+    currentMicId = deviceId || '';
     const tracks = recordingStream.getAudioTracks();
     if (tracks.length > 0) {
-      deviceName.textContent = '&#127897; ' + (tracks[0].label || 'ไมโครโฟน');
+      deviceName.textContent = '\uD83C\uDFA4 ' + (tracks[0].label || 'ไมโครโฟน');
     }
     recordStartBtn.disabled = false;
+    var micSelect = document.getElementById('micSelect');
+    if (micSelect) micSelect.value = deviceId || '';
+    refreshMicList();
 
     setAudioContext(new (window.AudioContext || window.webkitAudioContext)());
     const source = audioContext.createMediaStreamSource(recordingStream);
@@ -165,8 +250,8 @@ export async function requestMic() {
 
     startLevelMeter();
   } catch (err) {
-    deviceName.textContent = '&#9888; ' + err.message;
-    recordStartBtn.disabled = true;
+    deviceName.textContent = '\u26A0 ' + err.message;
+    recordStartBtn.disabled = false;
   }
 }
 
@@ -239,6 +324,8 @@ export function startGlobalRecord() {
     recordStartBtn.disabled = true;
     var recordStopBtn = document.getElementById('recordStopBtn');
     recordStopBtn.disabled = false;
+    var micSelect = document.getElementById('micSelect');
+    if (micSelect) micSelect.disabled = true;
     updateTimer();
     startMetronomeVisual();
   }
@@ -255,6 +342,8 @@ export function stopGlobalRecord() {
     recordStartBtn.disabled = false;
     var recordStopBtn = document.getElementById('recordStopBtn');
     recordStopBtn.disabled = true;
+    var micSelect = document.getElementById('micSelect');
+    if (micSelect) micSelect.disabled = false;
     var recordTimer = document.getElementById('recordTimer');
     recordTimer.textContent = '00:00.0';
     stopMetronomeVisual();
@@ -268,7 +357,12 @@ export function stopGlobalRecord() {
 
 export function startTrackRecord(trackId) {
   _ensureAudioCtx();
-  if (!mediaRecorder) { requestMic(); return; }
+  if (!mediaRecorder) {
+    requestMic().then(function () {
+      startTrackRecord(trackId);
+    })['catch'](function () {});
+    return;
+  }
   recordedChunks.length = 0;
   setCurrentRecTrackId(trackId);
   if (mediaRecorder && mediaRecorder.state !== 'recording') {
@@ -280,6 +374,8 @@ export function startTrackRecord(trackId) {
     recordStartBtn.disabled = true;
     var recordStopBtn = document.getElementById('recordStopBtn');
     recordStopBtn.disabled = false;
+    var micSelect = document.getElementById('micSelect');
+    if (micSelect) micSelect.disabled = true;
     updateTimer();
     startMetronomeVisual();
   }
@@ -305,11 +401,19 @@ export function finishTrackRecording(blob, duration) {
   setCurrentRecTrackId(null);
 }
 
+var decoderCtx = null;
+
+function getDecoderCtx() {
+  if (!decoderCtx || decoderCtx.state === 'closed') {
+    decoderCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return decoderCtx;
+}
+
 export function drawRecordedWaveform(canvas, blob) {
   var ctx = canvas.getContext('2d');
   if (!ctx) return;
-  var url = URL.createObjectURL(blob);
-  var ac = new (window.AudioContext || window.webkitAudioContext)();
+  var ac = getDecoderCtx();
   var reader = new FileReader();
   reader.onload = function (e) {
     ac.decodeAudioData(e.target.result, function (buffer) {
@@ -342,7 +446,6 @@ export function drawRecordedWaveform(canvas, blob) {
       ctx.globalAlpha = 0.15;
       ctx.fill();
       ctx.globalAlpha = 1;
-      URL.revokeObjectURL(url);
     });
   };
   reader.readAsArrayBuffer(blob);

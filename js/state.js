@@ -39,16 +39,9 @@ export let trackCounter = 0;
 
 // ─── Plan Mode Variables ───
 export let practiceBPM = 120;
-export let metronomeEnabled = false;
-export let metronomeVolume = 0.3;
-export let metronomeInterval = null;
-export let metronomeBeatCount = 0;
-export let loopEnabled = false;
-export let loopStart = 0;
-export let loopEnd = 0;
-export let practiceSpeed = 1.0;
-export let pitchPreserve = true;
 export const tapTimes = [];
+export let originalKey = '';
+export let currentKey = 'C Major';
 
 // ─── Record State ───
 export let mediaRecorder = null;
@@ -94,15 +87,8 @@ export function setActivePlayTrack(v) { activePlayTrack = v; }
 export function setPlayheadAnimId(v) { playheadAnimId = v; }
 export function setTrackCounter(v) { trackCounter = v; }
 export function setPracticeBPM(v) { practiceBPM = v; }
-export function setMetronomeEnabled(v) { metronomeEnabled = v; }
-export function setMetronomeVolume(v) { metronomeVolume = v; }
-export function setMetronomeInterval(v) { metronomeInterval = v; }
-export function setMetronomeBeatCount(v) { metronomeBeatCount = v; }
-export function setLoopEnabled(v) { loopEnabled = v; }
-export function setLoopStart(v) { loopStart = v; }
-export function setLoopEnd(v) { loopEnd = v; }
-export function setPracticeSpeed(v) { practiceSpeed = v; }
-export function setPitchPreserve(v) { pitchPreserve = v; }
+export function setOriginalKey(v) { originalKey = v; }
+export function setCurrentKey(v) { currentKey = v; }
 export function setMediaRecorder(v) { mediaRecorder = v; }
 export function setRecordingStream(v) { recordingStream = v; }
 export function setRecordingTimer(v) { recordingTimer = v; }

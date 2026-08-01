@@ -1,12 +1,30 @@
-import {
-  metronomeEnabled, setMetronomeEnabled,
-  metronomeVolume, setMetronomeVolume,
-  pitchPreserve, setPitchPreserve,
-  loopStart, setLoopStart,
-  loopEnd, setLoopEnd
-} from './state.js';
+import { currentKey, originalKey, setCurrentKey } from './state.js';
+import { semitoneOffsetOf } from './utils.js';
+
+const KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const KEY_MODES = ['Major', 'Minor'];
 
 let deps = {};
+
+export function populateKeySelect() {
+  var sel = document.getElementById('planKeySelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  KEY_NAMES.forEach(function (k) {
+    KEY_MODES.forEach(function (m) {
+      var o = document.createElement('option');
+      o.value = k + ' ' + m;
+      o.textContent = k + ' ' + m;
+      sel.appendChild(o);
+    });
+  });
+  sel.value = currentKey;
+}
+
+export function updateKeyDisplay() {
+  var sel = document.getElementById('planKeySelect');
+  if (sel) sel.value = currentKey;
+}
 
 export function initPlanModeListeners(d) {
   deps = d;
@@ -22,40 +40,15 @@ export function initPlanModeListeners(d) {
 
   document.getElementById('planTapBtn').addEventListener('click', deps.tapTempo);
 
-  document.getElementById('planMetronomeToggle').addEventListener('change', function () {
-    setMetronomeEnabled(this.checked);
-    var status = document.getElementById('planMetronomeStatus');
-    if (status) status.textContent = metronomeEnabled ? 'เปิด' : 'ปิด';
-    if (metronomeEnabled) {
-      deps.startMetronome();
-    } else {
-      deps.stopMetronome();
-    }
-  });
-
-  document.getElementById('planMetronomeVol').addEventListener('input', function () {
-    setMetronomeVolume(parseInt(this.value) / 100);
-    var valEl = document.getElementById('planMetronomeVolVal');
-    if (valEl) valEl.textContent = this.value + '%';
-  });
-
-  document.getElementById('planLoopToggle').addEventListener('change', function () {
-    deps.toggleLoop();
-  });
-
-  document.getElementById('planLoopSetStart').addEventListener('click', deps.setLoopStart);
-  document.getElementById('planLoopSetEnd').addEventListener('click', deps.setLoopEnd);
-
-  document.getElementById('planSpeedSlider').addEventListener('input', function () {
-    var v = parseInt(this.value);
-    deps.updateSpeed(v / 100);
-  });
-
-  document.getElementById('planPitchToggle').addEventListener('change', function () {
-    setPitchPreserve(this.checked);
-  });
+  var keySelect = document.getElementById('planKeySelect');
+  if (keySelect) {
+    keySelect.addEventListener('change', function () {
+      setCurrentKey(this.value);
+      console.log('[Plan Mode] เปลี่ยนคีย์ ->', this.value, '| semitone offset:', semitoneOffsetOf(this.value, originalKey));
+    });
+  }
 
   document.getElementById('planStartBtn').addEventListener('click', deps.startPractice);
 
-  deps.updateLoopDisplay();
+  populateKeySelect();
 }

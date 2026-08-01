@@ -33,3 +33,29 @@ export function buildLegend(elId, items) {
     return '<span class="legend-item"><span class="legend-key">' + item.key + '</span> ' + item.label + '</span>';
   }).join('');
 }
+
+// ─── Song key helpers (transpose) ───
+
+const PITCH_CLASSES = {
+  'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5,
+  'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11
+};
+
+export function keyNameToPitchClass(keyName) {
+  if (!keyName) return 0;
+  var m = String(keyName).match(/^([A-G]#?)/);
+  return (m && PITCH_CLASSES[m[1]] !== undefined) ? PITCH_CLASSES[m[1]] : 0;
+}
+
+export function semitoneOffsetOf(currentKey, originalKey) {
+  var cur = keyNameToPitchClass(currentKey);
+  var orig = keyNameToPitchClass(originalKey || 'C');
+  var raw = cur - orig;
+  if (raw > 6) raw -= 12;
+  if (raw <= -6) raw += 12;
+  return raw;
+}
+
+export function applySemitoneOffset(freq, offset) {
+  return freq * Math.pow(2, offset / 12);
+}

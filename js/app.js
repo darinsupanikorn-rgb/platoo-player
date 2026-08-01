@@ -2,32 +2,28 @@
 // Wires all modules together and initializes the app.
 
 import * as State from './state.js';
-import { escapeHtml, formatSize, formatDate, formatDuration } from './utils.js';
 
 // Import modules
-import { renderSongs, removeSong, handleFile } from './upload.js';
+import { renderSongs, handleFile } from './upload.js';
 import { initInstrumentsPanel, initVirtualInstruments, initKeyboardShortcuts } from './instruments.js';
 import {
   init as initAudioEngine,
-  startBacking, stopBacking, pauseBacking, loadBackingTrack,
-  createBackingGains, updateSoloMute, drawWaveform, updatePlayhead,
-  bounceMixdown, encodeWAV, trimTrackStart as trimStart, trimTrackEnd as trimEnd,
-  startMetronome, stopMetronome, updateBPM, tapTempo,
-  setLoopStart as planSetLoopStart, setLoopEnd as planSetLoopEnd,
-  toggleLoop, updateLoopDisplay, updateSpeed, startPractice,
+  initBackingTracks,
+  updateBPM, tapTempo,
+  startPractice,
   playMetronomeClick
 } from './audio-engine.js';
 import {
   init as initRecord,
-  pushUndoState, undo, redo, restoreTrackState,
+  pushUndoState, undo, redo,
   updateUndoRedoButtons, requestMic,
-  startGlobalRecord, stopGlobalRecord, startTrackRecord,
+  stopGlobalRecord, startTrackRecord,
   renderRecordings, initMetronomeUI, updateBpmDisplay,
   startMetronomeVisual, stopMetronomeVisual,
   drawRecordedWaveform
 } from './record.js';
-import { initSession, autoSave, saveSession, loadSession, loadSongs, saveSongs } from './session.js';
-import { initAddTrack, addNewTrack, trimTrackStart, trimTrackEnd } from './add-track.js';
+import { initSession, autoSave, loadSession } from './session.js';
+import { initAddTrack, addNewTrack } from './add-track.js';
 import { initPlanModeListeners } from './plan-mode.js';
 import {
   initUploadEvents, initMobileMenu, closeSidebar,
@@ -85,10 +81,9 @@ initAudioEngine({
   pushUndoState: pushUndoState,
   autoSave: autoSave,
   addNewTrack: addNewTrack,
-  closeSidebar: closeSidebar,
-  startMetronome: startMetronome,
-  stopMetronome: stopMetronome
+  closeSidebar: closeSidebar
 });
+initBackingTracks();
 
 // Record module (needs callbacks)
 initRecord({
@@ -131,18 +126,11 @@ initKeyboardShortcuts();
 initPlanModeListeners({
   updateBPM: updateBPM,
   tapTempo: tapTempo,
-  startMetronome: startMetronome,
-  stopMetronome: stopMetronome,
-  toggleLoop: toggleLoop,
-  setLoopStart: planSetLoopStart,
-  setLoopEnd: planSetLoopEnd,
-  updateSpeed: updateSpeed,
-  startPractice: startPractice,
-  updateLoopDisplay: updateLoopDisplay
+  startPractice: startPractice
 });
 
-// Metronome UI
-initMetronomeUI(updateBPM, startMetronome, stopMetronome);
+// Metronome UI (record bar)
+initMetronomeUI({ updateBPM: updateBPM });
 
 // Load saved data
 renderSongs();

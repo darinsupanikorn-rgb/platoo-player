@@ -6,48 +6,6 @@ const STEM_API_BASE = 'http://localhost:8001';
 
 let songs = [];
 
-export function getSongs() { return songs; }
-export function setSongs(v) { songs = v; }
-
-export function initUpload(handleFileCallback) {
-  var uploadZone = document.getElementById('uploadZone');
-  var fileInput = document.getElementById('fileInput');
-  var selectFileBtn = document.getElementById('selectFileBtn');
-
-  selectFileBtn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    fileInput.click();
-  });
-
-  uploadZone.addEventListener('click', function () {
-    fileInput.click();
-  });
-
-  fileInput.addEventListener('change', function () {
-    if (this.files && this.files[0]) {
-      handleFileCallback(this.files[0]);
-    }
-    this.value = '';
-  });
-
-  uploadZone.addEventListener('dragover', function (e) {
-    e.preventDefault();
-    this.classList.add('dragover');
-  });
-
-  uploadZone.addEventListener('dragleave', function () {
-    this.classList.remove('dragover');
-  });
-
-  uploadZone.addEventListener('drop', function (e) {
-    e.preventDefault();
-    this.classList.remove('dragover');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileCallback(e.dataTransfer.files[0]);
-    }
-  });
-}
-
 export function renderSongs() {
   var songsList = document.getElementById('songsList');
   var songCount = document.getElementById('songCount');

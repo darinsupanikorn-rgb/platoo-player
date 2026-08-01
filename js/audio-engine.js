@@ -15,7 +15,6 @@ import {
   backingEqBass,
   backingEqMid,
   backingEqTreble,
-  backingLevelAnims,
   tapTimes,
   backingAudioCtx,
   masterGain,
@@ -27,14 +26,6 @@ import {
   activePlayTrack,
   playheadAnimId,
   practiceBPM,
-  metronomeEnabled,
-  metronomeVolume,
-  metronomeInterval,
-  metronomeBeatCount,
-  loopEnabled,
-  loopStart,
-  loopEnd,
-  practiceSpeed,
   metroFlashInterval,
 } from './state.js';
 
@@ -49,12 +40,6 @@ import {
   setActivePlayTrack,
   setPlayheadAnimId,
   setPracticeBPM,
-  setMetronomeInterval,
-  setMetronomeBeatCount,
-  setLoopEnabled,
-  setLoopStart as setLoopStartState,
-  setLoopEnd as setLoopEndState,
-  setPracticeSpeed,
 } from './state.js';
 
 import { escapeHtml } from './utils.js';
@@ -131,20 +116,14 @@ export function init(deps) {
 
 // ─── Backing Track (GarageBand-style) ───
 
-export function drawWaveform(id, canvas) {
-  if (!backingBuffer || !canvas) return;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  var w = canvas.width;
-  var h = canvas.height;
-  var data = backingBuffer.getChannelData(0);
+var waveCache = {};
+
+function renderWaveformTo(ctx, buffer, w, h, color) {
+  var data = buffer.getChannelData(0);
   var step = Math.ceil(data.length / w);
   var amp = h / 2;
   ctx.fillStyle = '#111';
   ctx.fillRect(0, 0, w, h);
-
-  var colorMap = { vocal: '#5b8def', drums: '#e6c340', bass: '#6dbf6d', guitar: '#e68a3f', piano: '#c473d1', other: '#6ab0c9' };
-  var color = colorMap[id] || '#888';
 
   ctx.beginPath();
   ctx.moveTo(0, h / 2);
@@ -182,15 +161,30 @@ export function drawWaveform(id, canvas) {
   ctx.globalAlpha = 1;
 }
 
+export function drawWaveform(id, canvas) {
+  if (!backingBuffer || !canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  var w = canvas.width;
+  var h = canvas.height;
+  var colorMap = { vocal: '#5b8def', drums: '#e6c340', bass: '#6dbf6d', guitar: '#e68a3f', piano: '#c473d1', other: '#6ab0c9' };
+  var color = colorMap[id] || '#888';
+  var cached = waveCache[id];
+  if (!cached || cached.buffer !== backingBuffer || cached.w !== w || cached.h !== h) {
+    var off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    renderWaveformTo(off.getContext('2d'), backingBuffer, w, h, color);
+    cached = waveCache[id] = { buffer: backingBuffer, w: w, h: h, canvas: off };
+  }
+  ctx.drawImage(cached.canvas, 0, 0);
+}
+
 export function updatePlayhead() {
   if (!backingBuffer || !backingIsPlaying) return;
   var duration = backingBuffer.duration;
   var elapsed = (Date.now() - backingStartTime) / 1000;
   var displayPos = elapsed;
-  if (loopEnabled && loopEnd > loopStart && displayPos >= loopStart) {
-    var loopLen = loopEnd - loopStart;
-    displayPos = loopStart + ((displayPos - loopStart) % loopLen);
-  }
   var pct = Math.min(1, Math.max(0, displayPos / duration));
   document.querySelectorAll('.backing-track').forEach(function (track) {
     var canvas = track.querySelector('.track-waveform');
@@ -416,23 +410,6 @@ export function updateSoloMute() {
   });
 }
 
-export function startBackingLevelMeter(id) {
-  var bar = document.getElementById('tlvl_' + id);
-  if (!bar || !backingGainNodes[id]) return;
-  function tick() {
-    if (!backingIsPlaying || !bar) { bar.style.width = '0%'; return; }
-    var now = Date.now();
-    var val = Math.sin(now / 300 + instruments.findIndex(function (i) { return i.id === id; }) * 2) * 0.3 + 0.5;
-    var pct = Math.min(80, Math.max(0, val * 60 * (instState[id] / 100)));
-    bar.style.width = pct + '%';
-    if (pct > 50) bar.style.background = '#e68a3f';
-    else if (pct > 25) bar.style.background = '#e6c340';
-    else bar.style.background = '#5b8def';
-    backingLevelAnims[id] = requestAnimationFrame(tick);
-  }
-  tick();
-}
-
 export function loadBackingTrack(file) {
   var reader = new FileReader();
   reader.onload = function (e) {
@@ -635,12 +612,6 @@ export function startBacking() {
 
   var src = backingAudioCtx.createBufferSource();
   src.buffer = backingBuffer;
-  src.playbackRate.value = practiceSpeed;
-  if (loopEnabled && loopEnd > loopStart) {
-    src.loop = true;
-    src.loopStart = loopStart;
-    src.loopEnd = loopEnd;
-  }
 
   instruments.forEach(function (inst) {
     var gain = backingGainNodes[inst.id];
@@ -650,7 +621,6 @@ export function startBacking() {
   });
 
   updateSoloMute();
-  if (metronomeEnabled) startMetronome();
   _startMetronomeVisual();
 
   src.start(0, backingStartOffset);
@@ -672,7 +642,6 @@ export function startBacking() {
 }
 
 export function stopBacking() {
-  stopMetronome();
   _stopMetronomeVisual();
   if (backingSource) {
     try { backingSource.stop(); } catch {}
@@ -713,10 +682,6 @@ export function updateBPM(value) {
   if (input) input.value = practiceBPM;
   if (slider) slider.value = practiceBPM;
   _updateBpmDisplay();
-  if (metronomeEnabled) {
-    stopMetronome();
-    startMetronome();
-  }
   if (metroFlashInterval) {
     _stopMetronomeVisual();
     _startMetronomeVisual();
@@ -749,95 +714,13 @@ export function playMetronomeClick(isDownbeat) {
     var gain = backingAudioCtx.createGain();
     osc.type = 'sine';
     osc.frequency.value = isDownbeat ? 1000 : 800;
-    gain.gain.setValueAtTime(metronomeVolume, now);
+    gain.gain.setValueAtTime(0.3, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     osc.connect(gain);
     gain.connect(masterGain);
     osc.start(now);
     osc.stop(now + 0.05);
   } catch (e) { console.warn('metronome click error:', e); }
-}
-
-export function startMetronome() {
-  stopMetronome();
-  setMetronomeBeatCount(0);
-  setMetronomeInterval(setInterval(function () {
-    var isDownbeat = metronomeBeatCount % 4 === 0;
-    playMetronomeClick(isDownbeat);
-    setMetronomeBeatCount(metronomeBeatCount + 1);
-  }, 60000 / practiceBPM));
-}
-
-export function stopMetronome() {
-  if (metronomeInterval) {
-    clearInterval(metronomeInterval);
-    setMetronomeInterval(null);
-  }
-  setMetronomeBeatCount(0);
-}
-
-export function setLoopStart() {
-  if (!backingBuffer) {
-    alert('\u0E01\u0E23\u0E38\u0E49\u0E43\u0E0A\u0E49\u0E44\u0E1F\u0E22\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E15\u0E31\u0E49\u0E07\u0E02\u0E07\u0E25\u0E38\u0E2D');
-    return;
-  }
-  var currentPos = 0;
-  if (backingIsPlaying) {
-    currentPos = (Date.now() - backingStartTime) / 1000;
-  }
-  setLoopStartState(currentPos);
-  updateLoopDisplay();
-}
-
-export function setLoopEnd() {
-  if (!backingBuffer) {
-    alert('\u0E01\u0E23\u0E38\u0E49\u0E43\u0E0A\u0E49\u0E44\u0E1F\u0E22\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E15\u0E31\u0E49\u0E07\u0E02\u0E07\u0E25\u0E38\u0E2D');
-    return;
-  }
-  var currentPos = backingBuffer.duration;
-  if (backingIsPlaying) {
-    currentPos = (Date.now() - backingStartTime) / 1000;
-  }
-  setLoopEndState(currentPos);
-  if (loopEnd > loopStart) {
-    updateLoopDisplay();
-  }
-}
-
-export function toggleLoop() {
-  setLoopEnabled(!loopEnabled);
-  var status = document.getElementById('planLoopStatus');
-  if (status) status.textContent = loopEnabled ? '\u0E40\u0E1B\u0E34\u0E14' : '\u0E1B\u0E34\u0E14';
-  if (backingIsPlaying && loopEnabled) {
-    if (loopEnd <= loopStart) {
-      setLoopEndState(backingBuffer ? backingBuffer.duration : 0);
-    }
-    setBackingStartOffset((Date.now() - backingStartTime) / 1000);
-    startBacking();
-  }
-}
-
-export function updateLoopDisplay() {
-  function fmt(t) { var m = Math.floor(t / 60); var s = Math.floor(t % 60); return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0'); }
-  var startEl = document.getElementById('planLoopStartTime');
-  var endEl = document.getElementById('planLoopEndTime');
-  if (startEl) startEl.textContent = fmt(loopStart);
-  if (endEl) endEl.textContent = fmt(loopEnd);
-}
-
-export function updateSpeed(value) {
-  setPracticeSpeed(value);
-  var valEl = document.getElementById('planSpeedVal');
-  if (valEl) valEl.textContent = practiceSpeed.toFixed(1) + 'x';
-  if (backingIsPlaying && backingSource) {
-    try {
-      backingSource.playbackRate.setValueAtTime(practiceSpeed, backingAudioCtx.currentTime);
-    } catch (e) {
-      var offset = (Date.now() - backingStartTime) / 1000;
-      setBackingStartOffset(offset);
-      startBacking();
-    }
-  }
 }
 
 export function startPractice() {
@@ -848,14 +731,7 @@ export function startPractice() {
   if (backingIsPlaying) {
     stopBacking();
   }
-  if (loopEnabled) {
-    if (loopEnd <= loopStart) {
-      setLoopEndState(backingBuffer.duration);
-    }
-    setBackingStartOffset(loopStart);
-  } else {
-    setBackingStartOffset(0);
-  }
+  setBackingStartOffset(0);
   startBacking();
 }
 
@@ -878,6 +754,14 @@ export function bounceMixdown() {
 
   var anySolo = instruments.some(function (i) { return instState[i.id + '_solo']; });
 
+  var activeCount = 0;
+  instruments.forEach(function (inst) {
+    var muted = instState[inst.id + '_muted'];
+    var soloed = instState[inst.id + '_solo'];
+    if (anySolo ? soloed : !muted) activeCount++;
+  });
+  var mixScale = activeCount > 0 ? 1 / activeCount : 1;
+
   instruments.forEach(function (inst) {
     var muted = instState[inst.id + '_muted'];
     var soloed = instState[inst.id + '_solo'];
@@ -891,14 +775,33 @@ export function bounceMixdown() {
     source.buffer = backingBuffer;
 
     var gainNode = offlineCtx.createGain();
-    gainNode.gain.value = vol;
+    gainNode.gain.value = vol * mixScale;
 
     var panNode = offlineCtx.createStereoPanner();
     panNode.pan.value = panVal;
 
+    var eqBass = offlineCtx.createBiquadFilter();
+    eqBass.type = 'lowshelf';
+    eqBass.frequency.value = 320;
+    eqBass.gain.value = instState[inst.id + '_eq_bass'] || 0;
+
+    var eqMid = offlineCtx.createBiquadFilter();
+    eqMid.type = 'peaking';
+    eqMid.frequency.value = 1000;
+    eqMid.Q.value = 1;
+    eqMid.gain.value = instState[inst.id + '_eq_mid'] || 0;
+
+    var eqTreble = offlineCtx.createBiquadFilter();
+    eqTreble.type = 'highshelf';
+    eqTreble.frequency.value = 3200;
+    eqTreble.gain.value = instState[inst.id + '_eq_treble'] || 0;
+
     source.connect(gainNode);
     gainNode.connect(panNode);
-    panNode.connect(offlineCtx.destination);
+    panNode.connect(eqBass);
+    eqBass.connect(eqMid);
+    eqMid.connect(eqTreble);
+    eqTreble.connect(offlineCtx.destination);
 
     source.start(0);
   });
@@ -973,61 +876,44 @@ export function writeString(view, offset, str) {
 }
 
 // ─── Trim Helpers ───
+// The backing mixer shares one buffer across all tracks, so trimming is
+// applied to the shared backing buffer itself.
+
+function applyTrimmedBuffer(buf) {
+  setBackingBuffer(buf);
+  setBackingStartOffset(0);
+  if (backingIsPlaying) {
+    stopBacking();
+  } else {
+    instruments.forEach(function (inst) {
+      var canvas = document.getElementById('waveform_' + inst.id);
+      if (canvas) drawWaveform(inst.id, canvas);
+    });
+  }
+}
 
 export function trimTrackStart(id) {
-  var track = backingTracklist.querySelector('.backing-track[data-id="' + id + '"]');
-  if (!track || !backingBuffer) return;
-  var canvas = track.querySelector('.track-waveform');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  var w = canvas.width, h = canvas.height;
-  var trimPct = 0.2;
-  var data = backingBuffer.getChannelData(0);
-  var startIdx = Math.floor(data.length * trimPct);
-  var step = Math.ceil((data.length - startIdx) / w);
-  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x = 0; x < w; x++) {
-    var sum = 0;
-    for (var j = 0; j < step; j++) { var idx = startIdx + x * step + j; if (idx < data.length) sum += Math.abs(data[idx]); }
-    ctx.lineTo(x, h / 2 - sum / step * 2 * (h / 2));
+  if (!backingBuffer || !backingAudioCtx) {
+    alert('\u0E01\u0E23\u0E38\u0E49\u0E43\u0E0A\u0E49\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E01\u0E48\u0E2D\u0E19\u0E15\u0E31\u0E14\u0E2B\u0E31\u0E27');
+    return;
   }
-  ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x2 = 0; x2 < w; x2++) {
-    var sum2 = 0;
-    for (var j2 = 0; j2 < step; j2++) { var idx2 = startIdx + x2 * step + j2; if (idx2 < data.length) sum2 += Math.abs(data[idx2]); }
-    ctx.lineTo(x2, h / 2 + sum2 / step * 2 * (h / 2));
+  var cut = Math.floor(backingBuffer.length * 0.2);
+  var buf = backingAudioCtx.createBuffer(backingBuffer.numberOfChannels, backingBuffer.length - cut, backingBuffer.sampleRate);
+  for (var c = 0; c < backingBuffer.numberOfChannels; c++) {
+    buf.getChannelData(c).set(backingBuffer.getChannelData(c).subarray(cut));
   }
-  ctx.fillStyle = '#888'; ctx.globalAlpha = 0.15; ctx.fill(); ctx.globalAlpha = 1;
+  applyTrimmedBuffer(buf);
 }
 
 export function trimTrackEnd(id) {
-  var track = backingTracklist.querySelector('.backing-track[data-id="' + id + '"]');
-  if (!track || !backingBuffer) return;
-  var canvas = track.querySelector('.track-waveform');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  var w = canvas.width, h = canvas.height;
-  var trimPct = 0.8;
-  var data = backingBuffer.getChannelData(0);
-  var endIdx = Math.floor(data.length * trimPct);
-  var step = Math.ceil(endIdx / w);
-  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x = 0; x < w; x++) {
-    var sum = 0;
-    for (var j = 0; j < step; j++) { var idx = x * step + j; if (idx < endIdx) sum += Math.abs(data[idx]); }
-    ctx.lineTo(x, h / 2 - sum / step * 2 * (h / 2));
+  if (!backingBuffer || !backingAudioCtx) {
+    alert('\u0E01\u0E23\u0E38\u0E49\u0E43\u0E0A\u0E49\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E01\u0E48\u0E2D\u0E19\u0E15\u0E31\u0E14\u0E17\u0E49\u0E32\u0E22');
+    return;
   }
-  ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x2 = 0; x2 < w; x2++) {
-    var sum2 = 0;
-    for (var j2 = 0; j2 < step; j2++) { var idx2 = x2 * step + j2; if (idx2 < endIdx) sum2 += Math.abs(data[idx2]); }
-    ctx.lineTo(x2, h / 2 + sum2 / step * 2 * (h / 2));
+  var newLen = Math.floor(backingBuffer.length * 0.8);
+  var buf = backingAudioCtx.createBuffer(backingBuffer.numberOfChannels, newLen, backingBuffer.sampleRate);
+  for (var c = 0; c < backingBuffer.numberOfChannels; c++) {
+    buf.getChannelData(c).set(backingBuffer.getChannelData(c).subarray(0, newLen));
   }
-  ctx.fillStyle = '#888'; ctx.globalAlpha = 0.15; ctx.fill(); ctx.globalAlpha = 1;
+  applyTrimmedBuffer(buf);
 }

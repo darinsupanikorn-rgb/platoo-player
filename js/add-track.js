@@ -1,5 +1,6 @@
-import { trackCounter, setTrackCounter, activeOscillators, backingBuffer } from './state.js';
+import { trackCounter, setTrackCounter } from './state.js';
 import { escapeHtml } from './utils.js';
+import { trimTrackStart, trimTrackEnd } from './audio-engine.js';
 
 let deps = {};
 
@@ -81,8 +82,8 @@ export function addNewTrack(type, restoreData) {
 
   track.innerHTML = [
     '<div class="backing-track-header">',
-    '  <span class="track-icon">' + icon + '</span>',
-    '  <span class="track-name">' + label + '</span>',
+    '  <span class="track-icon">' + escapeHtml(String(icon)) + '</span>',
+    '  <span class="track-name">' + escapeHtml(String(label)) + '</span>',
     '  <div class="track-btns">',
     '    <button class="track-btn track-play' + (restoreData && restoreData.playing ? ' active' : '') + '" data-id="' + id + '">&#9654;</button>',
     '    <button class="track-btn track-mute' + (muteActive ? ' active' : '') + '" data-id="' + id + '">M</button>',
@@ -214,64 +215,4 @@ export function addNewTrack(type, restoreData) {
     var ctx = canvas.getContext('2d');
     if (ctx) { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
   }
-}
-
-export function trimTrackStart(id) {
-  var backingTracklist = document.getElementById('backingTracklist');
-  var track = backingTracklist.querySelector('.backing-track[data-id="' + id + '"]');
-  if (!track || !backingBuffer) return;
-  var canvas = track.querySelector('.track-waveform');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  var w = canvas.width, h = canvas.height;
-  var trimPct = 0.2;
-  var data = backingBuffer.getChannelData(0);
-  var startIdx = Math.floor(data.length * trimPct);
-  var step = Math.ceil((data.length - startIdx) / w);
-  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x = 0; x < w; x++) {
-    var sum = 0;
-    for (var j = 0; j < step; j++) { var idx = startIdx + x * step + j; if (idx < data.length) sum += Math.abs(data[idx]); }
-    ctx.lineTo(x, h / 2 - sum / step * 2 * (h / 2));
-  }
-  ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x2 = 0; x2 < w; x2++) {
-    var sum2 = 0;
-    for (var j2 = 0; j2 < step; j2++) { var idx2 = startIdx + x2 * step + j2; if (idx2 < data.length) sum2 += Math.abs(data[idx2]); }
-    ctx.lineTo(x2, h / 2 + sum2 / step * 2 * (h / 2));
-  }
-  ctx.fillStyle = '#888'; ctx.globalAlpha = 0.15; ctx.fill(); ctx.globalAlpha = 1;
-}
-
-export function trimTrackEnd(id) {
-  var backingTracklist = document.getElementById('backingTracklist');
-  var track = backingTracklist.querySelector('.backing-track[data-id="' + id + '"]');
-  if (!track || !backingBuffer) return;
-  var canvas = track.querySelector('.track-waveform');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  var w = canvas.width, h = canvas.height;
-  var trimPct = 0.8;
-  var data = backingBuffer.getChannelData(0);
-  var endIdx = Math.floor(data.length * trimPct);
-  var step = Math.ceil(endIdx / w);
-  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x = 0; x < w; x++) {
-    var sum = 0;
-    for (var j = 0; j < step; j++) { var idx = x * step + j; if (idx < endIdx) sum += Math.abs(data[idx]); }
-    ctx.lineTo(x, h / 2 - sum / step * 2 * (h / 2));
-  }
-  ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, h / 2);
-  for (var x2 = 0; x2 < w; x2++) {
-    var sum2 = 0;
-    for (var j2 = 0; j2 < step; j2++) { var idx2 = x2 * step + j2; if (idx2 < endIdx) sum2 += Math.abs(data[idx2]); }
-    ctx.lineTo(x2, h / 2 + sum2 / step * 2 * (h / 2));
-  }
-  ctx.fillStyle = '#888'; ctx.globalAlpha = 0.15; ctx.fill(); ctx.globalAlpha = 1;
 }

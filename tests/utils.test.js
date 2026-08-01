@@ -34,8 +34,7 @@ function assertIncludes(str, sub, msg) {
 }
 
 // ─── Test: escapeHtml ───
-import { escapeHtml, formatSize, formatDate, formatDuration, buildLegend } from '../js/utils.js';
-
+import { escapeHtml, formatSize, formatDate, formatDuration, buildLegend, keyNameToPitchClass, semitoneOffsetOf, applySemitoneOffset } from '../js/utils.js';
 const hasDocument = typeof document !== 'undefined';
 
 test('escapeHtml: plain text unchanged', () => {
@@ -166,6 +165,45 @@ test('state: MAX_UNDO is 30', () => {
 
 // ─── Test: Audio Engine pure functions ───
 // makeDistortionCurve and createReverbImpulse need AudioContext, skip in Node
+
+// ─── Test: Song key helpers (transpose) ───
+
+test('key: keyNameToPitchClass parses key names', () => {
+  assertEqual(keyNameToPitchClass('C Major'), 0);
+  assertEqual(keyNameToPitchClass('C# Major'), 1);
+  assertEqual(keyNameToPitchClass('F# Minor'), 6);
+  assertEqual(keyNameToPitchClass('B Minor'), 11);
+  assertEqual(keyNameToPitchClass('A'), 9);
+  assertEqual(keyNameToPitchClass(''), 0, 'empty treated as C');
+  assertEqual(keyNameToPitchClass('???'), 0, 'unparseable treated as C');
+});
+
+test('key: semitoneOffsetOf = currentKey - originalKey (wrapped to nearest)', () => {
+  assertEqual(semitoneOffsetOf('D Major', 'C Major'), 2);
+  assertEqual(semitoneOffsetOf('C Major', 'D Major'), -2);
+  assertEqual(semitoneOffsetOf('E Minor', 'C Major'), 4);
+  assertEqual(semitoneOffsetOf('C Major', 'E Minor'), -4);
+  assertEqual(semitoneOffsetOf('A Minor', 'C Major'), -3, 'raw +9 wraps down');
+  assertEqual(semitoneOffsetOf('G# Major', 'C Major'), -4, 'raw +8 wraps down');
+  assertEqual(semitoneOffsetOf('C Major', 'F# Minor'), 6, 'tritone wraps up');
+  assertEqual(semitoneOffsetOf('D Minor', ''), 2, 'unknown originalKey treated as C');
+  assertEqual(semitoneOffsetOf('C Major', 'C Major'), 0);
+  assertEqual(semitoneOffsetOf('', ''), 0);
+});
+
+test('key: applySemitoneOffset shifts frequency by 2^(n/12)', () => {
+  assertEqual(applySemitoneOffset(440, 0), 440);
+  assertEqual(applySemitoneOffset(440, 12), 880);
+  assertEqual(applySemitoneOffset(440, -12), 220);
+  assertCloseFn(applySemitoneOffset(440, 2), 493.883, 0.01);
+  assertCloseFn(applySemitoneOffset(110, -2), 97.999, 0.01);
+});
+
+function assertCloseFn(actual, expected, tol) {
+  if (Math.abs(actual - expected) > tol) {
+    throw new Error(`Expected ~${expected}, got ${actual}`);
+  }
+}
 
 // ─── Summary ───
 console.log('\n═══════════════════════════════════');

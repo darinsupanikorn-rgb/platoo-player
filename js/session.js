@@ -1,4 +1,7 @@
-import { saveTimeout, setSaveTimeout, trackCounter, setTrackCounter } from './state.js';
+import {
+  saveTimeout, setSaveTimeout, trackCounter, setTrackCounter,
+  originalKey, currentKey, setOriginalKey, setCurrentKey
+} from './state.js';
 import { escapeHtml } from './utils.js';
 
 let addNewTrackFn = null;
@@ -45,7 +48,12 @@ export function saveSession() {
       solo: soloBtn ? soloBtn.classList.contains('active') : false
     });
   });
-  localStorage.setItem('platoo_session', JSON.stringify({ tracks: data, trackCounter: trackCounter }));
+  localStorage.setItem('platoo_session', JSON.stringify({
+    tracks: data,
+    trackCounter: trackCounter,
+    originalKey: originalKey,
+    currentKey: currentKey
+  }));
 }
 
 export function loadSession() {
@@ -54,6 +62,12 @@ export function loadSession() {
   try {
     var data = JSON.parse(saved);
     if (data.trackCounter) setTrackCounter(data.trackCounter);
+    if (data.originalKey !== undefined) setOriginalKey(data.originalKey);
+    if (data.currentKey) {
+      setCurrentKey(data.currentKey);
+      var keySelect = document.getElementById('planKeySelect');
+      if (keySelect) keySelect.value = data.currentKey;
+    }
     if (data.tracks) {
       data.tracks.forEach(function (t) {
         addNewTrackFn(t.type, t);
