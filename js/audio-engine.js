@@ -27,6 +27,8 @@ import {
   playheadAnimId,
   practiceBPM,
   metroFlashInterval,
+  stemBuffers,
+  stemsSongId,
 } from './state.js';
 
 import {
@@ -40,14 +42,18 @@ import {
   setActivePlayTrack,
   setPlayheadAnimId,
   setPracticeBPM,
+  setStemsSongId,
 } from './state.js';
 
 import { escapeHtml } from './utils.js';
+import { loadSongs } from './session.js';
+import { getSongBlob } from './song-store.js';
 
 // ─── DOM References (initialized in init()) ───
 let backingSelectBtn = null;
 let backingFileInput = null;
 let backingFilename = null;
+let backingSongSelect = null;
 let backingPlayBtn = null;
 let backingPauseBtn = null;
 let backingStopBtn = null;
@@ -75,6 +81,7 @@ export function init(deps) {
   backingSelectBtn = document.getElementById('backingSelectBtn');
   backingFileInput = document.getElementById('backingFileInput');
   backingFilename = document.getElementById('backingFilename');
+  backingSongSelect = document.getElementById('backingSongSelect');
   backingPlayBtn = document.getElementById('backingPlayBtn');
   backingPauseBtn = document.getElementById('backingPauseBtn');
   backingStopBtn = document.getElementById('backingStopBtn');
@@ -88,9 +95,19 @@ export function init(deps) {
     var file = this.files && this.files[0];
     if (!file || !file.type.startsWith('audio/')) return;
     backingFilename.textContent = file.name;
+    stopStemSources();
+    clearStems();
+    setStemsSongId(null);
     loadBackingTrack(file);
     this.value = '';
   });
+
+  if (backingSongSelect) {
+    refreshSongSelect();
+    backingSongSelect.addEventListener('change', function () {
+      if (this.value) loadSongFromLibrary(this.value);
+    });
+  }
 
   backingPlayBtn.addEventListener('click', startBacking);
   backingPauseBtn.addEventListener('click', pauseBacking);
@@ -110,7 +127,57 @@ export function init(deps) {
       try { backingSource.stop(); } catch {}
       backingSource.disconnect();
     }
+    stopStemSources();
     startBacking();
+  });
+}
+
+// ─── Stem helpers (dashboard stems → per-channel buffers) ───
+
+var backingStemSources = [];
+
+function hasStems() {
+  return Object.keys(stemBuffers).length > 0;
+}
+
+function clearStems() {
+  Object.keys(stemBuffers).forEach(function (k) { delete stemBuffers[k]; });
+}
+
+function stopStemSources() {
+  backingStemSources.forEach(function (s) {
+    try { s.stop(); } catch {}
+    s.disconnect();
+  });
+  backingStemSources = [];
+}
+
+// Fetch + decode stem wavs into stemBuffers so each mixer channel plays its
+// own instrument (vocal/guitar/bass/drums/piano/other). Falls back silently
+// when offline. Stem URLs are keyed by demucs file names, channel buffers by
+// mixer channel ids (vocal -> vocals).
+export async function loadStemsForMixer(stemUrls, songId) {
+  if (!backingAudioCtx) setBackingAudioCtx(new (window.AudioContext || window.webkitAudioContext)());
+  if (!backingAudioCtx) return;
+  var stemMap = { vocal: 'vocals', guitar: 'guitar', bass: 'bass', drums: 'drums', piano: 'piano', other: 'other' };
+  var channelIds = Object.keys(stemMap);
+  var loaded = {};
+  var results = await Promise.all(channelIds.map(function (id) {
+    var url = stemUrls && stemUrls[stemMap[id]];
+    if (!url) return Promise.resolve();
+    return fetch(url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) {
+      return new Promise(function (resolve) {
+        backingAudioCtx.decodeAudioData(ab, function (buf) { loaded[id] = buf; resolve(); }, function () { resolve(); });
+      });
+    })['catch'](function () {});
+  }));
+  void results;
+  clearStems();
+  Object.keys(loaded).forEach(function (k) { stemBuffers[k] = loaded[k]; });
+  setStemsSongId(songId || null);
+  instruments.forEach(function (inst) {
+    var canvas = document.getElementById('waveform_' + inst.id);
+    if (canvas) drawWaveform(inst.id, canvas, stemBuffers[inst.id]);
   });
 }
 
@@ -161,8 +228,9 @@ function renderWaveformTo(ctx, buffer, w, h, color) {
   ctx.globalAlpha = 1;
 }
 
-export function drawWaveform(id, canvas) {
-  if (!backingBuffer || !canvas) return;
+export function drawWaveform(id, canvas, srcBuffer) {
+  var buffer = srcBuffer || backingBuffer;
+  if (!buffer || !canvas) return;
   var ctx = canvas.getContext('2d');
   if (!ctx) return;
   var w = canvas.width;
@@ -170,12 +238,12 @@ export function drawWaveform(id, canvas) {
   var colorMap = { vocal: '#5b8def', drums: '#e6c340', bass: '#6dbf6d', guitar: '#e68a3f', piano: '#c473d1', other: '#6ab0c9' };
   var color = colorMap[id] || '#888';
   var cached = waveCache[id];
-  if (!cached || cached.buffer !== backingBuffer || cached.w !== w || cached.h !== h) {
+  if (!cached || cached.buffer !== buffer || cached.w !== w || cached.h !== h) {
     var off = document.createElement('canvas');
     off.width = w;
     off.height = h;
-    renderWaveformTo(off.getContext('2d'), backingBuffer, w, h, color);
-    cached = waveCache[id] = { buffer: backingBuffer, w: w, h: h, canvas: off };
+    renderWaveformTo(off.getContext('2d'), buffer, w, h, color);
+    cached = waveCache[id] = { buffer: buffer, w: w, h: h, canvas: off };
   }
   ctx.drawImage(cached.canvas, 0, 0);
 }
@@ -195,7 +263,7 @@ export function updatePlayhead() {
     var h = canvas.height;
     var x = pct * w;
     var id = track.dataset.id;
-    drawWaveform(id, canvas);
+    drawWaveform(id, canvas, stemBuffers[id]);
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, h);
@@ -423,13 +491,55 @@ export function loadBackingTrack(file) {
       createBackingGains();
       instruments.forEach(function (inst) {
         var canvas = document.getElementById('waveform_' + inst.id);
-        if (canvas) drawWaveform(inst.id, canvas);
+        if (canvas) drawWaveform(inst.id, canvas, stemBuffers[inst.id]);
       });
     }, function () {
       alert('\u0E44\u0E21\u0E48\u0E2A\u0E32\u0E23\u0E20\u0E32\u0E1E\u0E43\u0E07\u0E23\u0E4C\u0E44\u0E1F\u0E22\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E23\u0E34\u0E48\u0E21');
     });
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ─── Song library (dashboard uploads → every mode) ───
+
+export function refreshSongSelect() {
+  if (!backingSongSelect) return;
+  var songs = loadSongs();
+  var prev = backingSongSelect.value;
+  backingSongSelect.innerHTML = '';
+  var placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'เลือกเพลงจากคลัง…';
+  backingSongSelect.appendChild(placeholder);
+  songs.forEach(function (s) {
+    var o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.name;
+    backingSongSelect.appendChild(o);
+  });
+  if (prev) backingSongSelect.value = prev;
+}
+
+export async function loadSongFromLibrary(songId) {
+  if (!songId) return;
+  var songs = loadSongs();
+  var song = null;
+  for (var i = 0; i < songs.length; i++) {
+    if (songs[i].id === songId) { song = songs[i]; break; }
+  }
+  if (!song) return;
+  var blob = await getSongBlob(songId);
+  if (!blob) {
+    alert('\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E40\u0E2A\u0E35\u0E22\u0E27\u0E43\u0E19\u0E04\u0E25\u0E31\u0E07 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E43\u0E2B\u0E21\u0E48\u0E08\u0E32\u0E01\u0E2B\u0E19\u0E49\u0E32\u0E41\u0E14\u0E0A\u0E1A\u0E2D\u0E23\u0E4C\u0E14');
+    return;
+  }
+  if (backingFilename) backingFilename.textContent = song.name;
+  if (stemsSongId !== songId) {
+    stopStemSources();
+    clearStems();
+    setStemsSongId(null);
+  }
+  loadBackingTrack(new File([blob], song.name, { type: song.type || blob.type || 'audio/mpeg' }));
 }
 
 export function makeDistortionCurve(amount) {
@@ -609,22 +719,38 @@ export function startBacking() {
     try { backingSource.stop(); } catch {}
     backingSource.disconnect();
   }
+  stopStemSources();
 
-  var src = backingAudioCtx.createBufferSource();
-  src.buffer = backingBuffer;
+  if (hasStems()) {
+    // Stems mode: each mixer channel plays its own instrument stem
+    instruments.forEach(function (inst) {
+      var buf = stemBuffers[inst.id];
+      if (!buf) return;
+      var s = backingAudioCtx.createBufferSource();
+      s.buffer = buf;
+      var gain = backingGainNodes[inst.id];
+      if (gain) s.connect(gain);
+      s.start(0, backingStartOffset);
+      backingStemSources.push(s);
+    });
+  } else {
+    var src = backingAudioCtx.createBufferSource();
+    src.buffer = backingBuffer;
 
-  instruments.forEach(function (inst) {
-    var gain = backingGainNodes[inst.id];
-    if (gain) {
-      src.connect(gain);
-    }
-  });
+    instruments.forEach(function (inst) {
+      var gain = backingGainNodes[inst.id];
+      if (gain) {
+        src.connect(gain);
+      }
+    });
+
+    src.start(0, backingStartOffset);
+    setBackingSource(src);
+  }
 
   updateSoloMute();
   _startMetronomeVisual();
 
-  src.start(0, backingStartOffset);
-  setBackingSource(src);
   setBackingIsPlaying(true);
   setBackingStartTime(Date.now() - backingStartOffset * 1000);
 
@@ -647,6 +773,7 @@ export function stopBacking() {
     try { backingSource.stop(); } catch {}
     backingSource.disconnect();
   }
+  stopStemSources();
   setBackingIsPlaying(false);
   setBackingStartOffset(0);
   setActivePlayTrack(null);
@@ -656,15 +783,18 @@ export function stopBacking() {
   backingStopBtn.disabled = true;
   instruments.forEach(function (i) {
     var canvas = document.getElementById('waveform_' + i.id);
-    if (canvas) drawWaveform(i.id, canvas);
+    if (canvas) drawWaveform(i.id, canvas, stemBuffers[i.id]);
   });
 }
 
 export function pauseBacking() {
-  if (backingSource && backingIsPlaying) {
+  if ((backingSource || backingStemSources.length) && backingIsPlaying) {
     setBackingStartOffset((Date.now() - backingStartTime) / 1000);
-    try { backingSource.stop(); } catch {}
-    backingSource.disconnect();
+    if (backingSource) {
+      try { backingSource.stop(); } catch {}
+      backingSource.disconnect();
+    }
+    stopStemSources();
     setBackingIsPlaying(false);
     if (playheadAnimId) { cancelAnimationFrame(playheadAnimId); setPlayheadAnimId(null); }
     backingPlayBtn.disabled = false;
@@ -753,12 +883,16 @@ export function bounceMixdown() {
   var offlineCtx = new OfflineAudioContext(2, Math.ceil(sampleRate * duration), sampleRate);
 
   var anySolo = instruments.some(function (i) { return instState[i.id + '_solo']; });
+  var stemsMode = hasStems();
 
   var activeCount = 0;
   instruments.forEach(function (inst) {
     var muted = instState[inst.id + '_muted'];
     var soloed = instState[inst.id + '_solo'];
-    if (anySolo ? soloed : !muted) activeCount++;
+    if (anySolo ? soloed : !muted) {
+      if (stemsMode && !stemBuffers[inst.id]) return;
+      activeCount++;
+    }
   });
   var mixScale = activeCount > 0 ? 1 / activeCount : 1;
 
@@ -767,12 +901,14 @@ export function bounceMixdown() {
     var soloed = instState[inst.id + '_solo'];
     var shouldPlay = anySolo ? soloed : !muted;
     if (!shouldPlay) return;
+    var buf = stemsMode ? stemBuffers[inst.id] : backingBuffer;
+    if (!buf) return;
 
     var vol = instState[inst.id] / 100;
     var panVal = instState[inst.id + '_pan'] / 50;
 
     var source = offlineCtx.createBufferSource();
-    source.buffer = backingBuffer;
+    source.buffer = buf;
 
     var gainNode = offlineCtx.createGain();
     gainNode.gain.value = vol * mixScale;
@@ -877,7 +1013,23 @@ export function writeString(view, offset, str) {
 
 // ─── Trim Helpers ───
 // The backing mixer shares one buffer across all tracks, so trimming is
-// applied to the shared backing buffer itself.
+// applied to the shared backing buffer itself (and to stem buffers when
+// stems are active, so per-track sources stay aligned).
+
+function trimBufferChannels(buffer, startSample, length) {
+  var out = backingAudioCtx.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
+  for (var c = 0; c < buffer.numberOfChannels; c++) {
+    out.getChannelData(c).set(buffer.getChannelData(c).subarray(startSample, startSample + length));
+  }
+  return out;
+}
+
+function trimStems(startSample, length) {
+  Object.keys(stemBuffers).forEach(function (k) {
+    var b = stemBuffers[k];
+    if (b) stemBuffers[k] = trimBufferChannels(b, startSample, length);
+  });
+}
 
 function applyTrimmedBuffer(buf) {
   setBackingBuffer(buf);
@@ -887,7 +1039,7 @@ function applyTrimmedBuffer(buf) {
   } else {
     instruments.forEach(function (inst) {
       var canvas = document.getElementById('waveform_' + inst.id);
-      if (canvas) drawWaveform(inst.id, canvas);
+      if (canvas) drawWaveform(inst.id, canvas, stemBuffers[inst.id]);
     });
   }
 }
@@ -898,10 +1050,8 @@ export function trimTrackStart(id) {
     return;
   }
   var cut = Math.floor(backingBuffer.length * 0.2);
-  var buf = backingAudioCtx.createBuffer(backingBuffer.numberOfChannels, backingBuffer.length - cut, backingBuffer.sampleRate);
-  for (var c = 0; c < backingBuffer.numberOfChannels; c++) {
-    buf.getChannelData(c).set(backingBuffer.getChannelData(c).subarray(cut));
-  }
+  var buf = trimBufferChannels(backingBuffer, cut, backingBuffer.length - cut);
+  trimStems(cut, backingBuffer.length - cut);
   applyTrimmedBuffer(buf);
 }
 
@@ -911,9 +1061,7 @@ export function trimTrackEnd(id) {
     return;
   }
   var newLen = Math.floor(backingBuffer.length * 0.8);
-  var buf = backingAudioCtx.createBuffer(backingBuffer.numberOfChannels, newLen, backingBuffer.sampleRate);
-  for (var c = 0; c < backingBuffer.numberOfChannels; c++) {
-    buf.getChannelData(c).set(backingBuffer.getChannelData(c).subarray(0, newLen));
-  }
+  var buf = trimBufferChannels(backingBuffer, 0, newLen);
+  trimStems(0, newLen);
   applyTrimmedBuffer(buf);
 }

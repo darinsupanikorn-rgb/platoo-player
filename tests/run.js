@@ -31,7 +31,14 @@ for (const file of testFiles) {
     }
   } catch (e) {
     console.log(e.stdout || e.message);
-    totalFailed++;
+    // Parse the failing file's real counts too (non-zero exit still prints its summary)
+    const match = (e.stdout || '').match(/Pass:\s*(\d+)\s*\|\s*Fail:\s*(\d+)/);
+    if (match) {
+      totalPassed += parseInt(match[1]);
+      totalFailed += parseInt(match[2]);
+    } else {
+      totalFailed++;
+    }
   }
 }
 

@@ -74,6 +74,9 @@ export let saveTimeout = null;
 
 // ─── Stem Separation ───
 export const stemAudioElements = {};
+export const stemBuffers = {};
+export let stemsSongId = null;
+export function setStemsSongId(v) { stemsSongId = v; }
 
 // ─── Setters for state that needs controlled mutation ───
 export function setBackingAudioCtx(v) { backingAudioCtx = v; }

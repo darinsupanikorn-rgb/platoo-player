@@ -31,6 +31,15 @@ let _ensureAudioCtx = null;
 var currentMicId = '';
 let _playMetronomeClick = null;
 
+// Captured at mediaRecorder.start() so a recording that finishes without an
+// explicit stopGlobalRecord (e.g. stream ended) still knows its own track/time.
+var sessionRecTrackId = null;
+var sessionRecStartTime = null;
+// Captured at mediaRecorder.stop() so a delayed onstop attributes the blob to
+// the track/time of THAT recording, even if a newer one has started since.
+var pendingStopTrackId = null;
+var pendingStopStartTime = null;
+
 export function init(deps) {
   if (deps.addNewTrack) _addNewTrack = deps.addNewTrack;
   if (deps.autoSave) _autoSave = deps.autoSave;
@@ -117,6 +126,11 @@ setRecordings(loadRecordings());
 
 // ─── Record (compact bar + per-track) ───
 
+function parseSliderValue(value, fallback) {
+  var v = parseInt(value);
+  return isNaN(v) ? fallback : v;
+}
+
 export function captureTrackState() {
   var backingTracklist = document.getElementById('backingTracklist');
   var tracks = backingTracklist.querySelectorAll('.backing-track');
@@ -129,11 +143,11 @@ export function captureTrackState() {
       type: track.dataset.type,
       icon: (track.querySelector('.track-icon') || {}).textContent || '\uD83C\uDFB5',
       name: (track.querySelector('.track-name') || {}).textContent || '',
-      volume: parseInt((track.querySelector('.track-vol') || {}).value) || 80,
-      pan: parseInt((track.querySelector('.pan-slider') || {}).value) || 0,
-      eq_bass: parseInt((track.querySelector('.eq-slider[data-band="bass"]') || {}).value) || 0,
-      eq_mid: parseInt((track.querySelector('.eq-slider[data-band="mid"]') || {}).value) || 0,
-      eq_treble: parseInt((track.querySelector('.eq-slider[data-band="treble"]') || {}).value) || 0,
+      volume: parseSliderValue((track.querySelector('.track-vol') || {}).value, 80),
+      pan: parseSliderValue((track.querySelector('.pan-slider') || {}).value, 0),
+      eq_bass: parseSliderValue((track.querySelector('.eq-slider[data-band="bass"]') || {}).value, 0),
+      eq_mid: parseSliderValue((track.querySelector('.eq-slider[data-band="mid"]') || {}).value, 0),
+      eq_treble: parseSliderValue((track.querySelector('.eq-slider[data-band="treble"]') || {}).value, 0),
       muted: (track.querySelector('.track-mute') || {}).classList.contains('active'),
       solo: (track.querySelector('.track-solo') || {}).classList.contains('active')
     });
@@ -244,8 +258,12 @@ export async function requestMic(deviceId) {
 
     mediaRecorder.onstop = function () {
       var blob = new Blob(recordedChunks, { type: mediaRecorder ? mediaRecorder.mimeType : 'audio/webm' });
-      var duration = Date.now() - recordingStartTime;
-      finishTrackRecording(blob, duration);
+      var trackId = pendingStopTrackId !== null ? pendingStopTrackId : sessionRecTrackId;
+      var startTime = pendingStopStartTime !== null ? pendingStopStartTime : sessionRecStartTime;
+      pendingStopTrackId = null;
+      pendingStopStartTime = null;
+      var duration = Date.now() - (startTime || Date.now());
+      finishTrackRecording(blob, duration, trackId);
     };
 
     startLevelMeter();
@@ -319,6 +337,8 @@ export function startGlobalRecord() {
     mediaRecorder.start(100);
     setIsRecording(true);
     setRecordingStartTime(Date.now());
+    sessionRecTrackId = null;
+    sessionRecStartTime = recordingStartTime;
     var recordStartBtn = document.getElementById('recordStartBtn');
     recordStartBtn.classList.add('recording');
     recordStartBtn.disabled = true;
@@ -334,6 +354,8 @@ export function startGlobalRecord() {
 export function stopGlobalRecord() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     var wasTrackRec = currentRecTrackId;
+    pendingStopTrackId = currentRecTrackId;
+    pendingStopStartTime = recordingStartTime;
     mediaRecorder.stop();
     setIsRecording(false);
     if (recordingTimer) clearInterval(recordingTimer);
@@ -369,6 +391,8 @@ export function startTrackRecord(trackId) {
     mediaRecorder.start(100);
     setIsRecording(true);
     setRecordingStartTime(Date.now());
+    sessionRecTrackId = trackId;
+    sessionRecStartTime = recordingStartTime;
     var recordStartBtn = document.getElementById('recordStartBtn');
     recordStartBtn.classList.add('recording');
     recordStartBtn.disabled = true;
@@ -381,10 +405,10 @@ export function startTrackRecord(trackId) {
   }
 }
 
-export function finishTrackRecording(blob, duration) {
+export function finishTrackRecording(blob, duration, trackId) {
   var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   var backingTracklist = document.getElementById('backingTracklist');
-  var trackEl = currentRecTrackId ? backingTracklist.querySelector('.backing-track[data-id="' + currentRecTrackId + '"]') : null;
+  var trackEl = trackId ? backingTracklist.querySelector('.backing-track[data-id="' + trackId + '"]') : null;
   var trackName = trackEl ? trackEl.querySelector('.track-name').textContent : 'บันทึก';
   var rec = { id: id, name: trackName + ' (' + formatDate(Date.now()) + ')', duration: duration, date: Date.now(), size: blob.size, blob: blob };
   recordings.push(rec);
@@ -398,7 +422,9 @@ export function finishTrackRecording(blob, duration) {
   }
 
   pushUndoState();
-  setCurrentRecTrackId(null);
+  if (trackId === currentRecTrackId) {
+    setCurrentRecTrackId(null);
+  }
 }
 
 var decoderCtx = null;

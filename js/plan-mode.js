@@ -26,6 +26,11 @@ export function updateKeyDisplay() {
   if (sel) sel.value = currentKey;
 }
 
+export function updateOriginalKeyDisplay() {
+  var el = document.getElementById('planOriginalKey');
+  if (el) el.textContent = originalKey || '\u2014';
+}
+
 export function initPlanModeListeners(d) {
   deps = d;
 
@@ -51,4 +56,5 @@ export function initPlanModeListeners(d) {
   document.getElementById('planStartBtn').addEventListener('click', deps.startPractice);
 
   populateKeySelect();
+  updateOriginalKeyDisplay();
 }

@@ -4,7 +4,7 @@
 import * as State from './state.js';
 
 // Import modules
-import { renderSongs, handleFile } from './upload.js';
+import { renderSongs, handleFile, applySongKeyIfAny } from './upload.js';
 import { initInstrumentsPanel, initVirtualInstruments, initKeyboardShortcuts } from './instruments.js';
 import {
   init as initAudioEngine,
@@ -135,6 +135,7 @@ initMetronomeUI({ updateBPM: updateBPM });
 // Load saved data
 renderSongs();
 loadSession();
+applySongKeyIfAny();
 renderRecordings();
 
 // Undo/Redo buttons
